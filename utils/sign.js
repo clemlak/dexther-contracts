@@ -8,10 +8,12 @@ function getDigest(
   alice,
   aliceTokens,
   aliceTokensIds,
+  aliceTokensValues,
   aliceNonce,
   bob,
   bobTokens,
   bobTokensIds,
+  bobTokensValues,
   bobNonce,
 ) {
   const hashedData = utils.keccak256(
@@ -20,9 +22,11 @@ function getDigest(
       'address',
       'address[]',
       'uint256[]',
+      'uint256[]',
       'uint256',
       'address',
       'address[]',
+      'uint256[]',
       'uint256[]',
       'uint256',
     ], [
@@ -30,10 +34,12 @@ function getDigest(
       alice,
       aliceTokens,
       aliceTokensIds,
+      aliceTokensValues,
       aliceNonce,
       bob,
       bobTokens,
       bobTokensIds,
+      bobTokensValues,
       bobNonce,
     ]),
   );
@@ -58,10 +64,12 @@ function signSwap(
   alice,
   aliceTokens,
   aliceTokensIds,
+  aliceTokensValues,
   aliceNonce,
   bob,
   bobTokens,
   bobTokensIds,
+  bobTokensValues,
   bobNonce,
 ) {
   const digest = getDigest(
@@ -70,10 +78,12 @@ function signSwap(
     alice,
     aliceTokens,
     aliceTokensIds,
+    aliceTokensValues,
     aliceNonce,
     bob,
     bobTokens,
     bobTokensIds,
+    bobTokensValues,
     bobNonce,
   );
 
