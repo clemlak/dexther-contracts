@@ -1,0 +1,160 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.7.1;
+pragma experimental ABIEncoderV2;
+
+import "@openzeppelin/contracts/introspection/IERC165.sol";
+import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
+
+
+contract Dexther is ERC721 {
+  bytes4 private constant ERC155_INTERFACE = 0xd9b67a26;
+  bytes4 private constant ERC721_INTERFACE = 0x80ac58cd;
+
+  address public admin;
+
+  enum BundleStatus { Open, Swapped, CollateralTaken, AssetsTaken, Closed }
+
+  struct Offer {
+    address creator;
+    uint256 collateralAmount;
+    address collateralTokenAddress;
+    address[] tokensAddresses;
+    uint256[] tokensIds;
+    uint256[] tokensValues;
+    OfferStatus status;
+    uint256
+  }
+
+  event OfferCreated(
+    uint256 indexed offerId,
+    address indexed creator,
+    uint256 indexed pledgeAmount,
+    address indexed pledgeTokenAddress,
+    address[] indexed tokensAddresses,
+    uint256[] indexed tokensIds,
+    uint256[] indexed tokensValues
+  );
+
+  event OfferStatusUpdated(
+    uint256 indexed offerId,
+    OfferStatus indexed status
+  );
+
+  modifier onlyAdmin() {
+    require(msg.sender == admin, "Not admin");
+    _;
+  }
+
+
+
+  constructor(
+    string memory initialBaseURI
+  ) ERC721(
+    "Dexther Collateralized NFT",
+    "cNFT"
+  ) {
+    admin = msg.sender;
+
+    _setBaseURI(initialBaseURI);
+  }
+
+  function setAdmin(address newAdmin) external onlyAdmin() {
+    admin = newAdmin;
+  }
+
+  function createOffer(
+    uint256 pledgeAmount,
+    address pledgeTokenAddress,
+    address[] memory tokensAddresses,
+    uint256[] memory tokensIds,
+    uint256[] memory tokensValues
+  ) external {
+    IERC20 pledgeToken = IERC20(pledgeTokenAddress);
+
+    pledgeToken.transferFrom(msg.sender, address(this), pledgeAmount);
+
+    require(tokensAddresses.length == tokensIds.length, "Tokens addresses or ids issue");
+    require(tokensAddresses.length == tokensValues.length, "Tokens addresses or values issue");
+
+    transfer(
+      msg.sender,
+      address(this),
+      tokensAddresses,
+      tokensIds,
+      tokensValues
+    );
+
+    Offer offer = Offer(
+      created: msg.sender,
+      pledgeAmount: pledgeAmount,
+      pledgeTokenAddress: pledgeTokenAddress,
+      tokensAddresses: tokensAddresses,
+      tokensIds: tokensIds,
+      tokensValues: tokensValues
+    );
+
+    offers.push(Offer);
+
+
+
+    emit OfferCreated(
+      offer.created,
+      offer.pledgeAmount,
+      offer.pledgeTokenAddress,
+      offer.tokensAddresses,
+      offer.tokensIds,
+      offer.tokensValues
+    );
+  }
+
+  function swapAssets(
+    uint256 fromOfferId,
+    uint256 toOfferId
+  ) {
+    require(offers[fromOfferId].creator == msg.sender, "Sender not creator");
+
+  }
+
+  function claimOffer(
+    uint256 offerId
+  ) {
+
+  }
+
+  function transfer(
+    address from,
+    address to,
+    address[] memory tokensAddresses,
+    uint256[] memory tokensIds,
+    uint256[] memory tokensValues
+  ) private {
+    for (uint256 i = 0; i < tokensAddresses.length; i += 1) {
+      IERC165 tokenWithoutInterface = IERC165(tokensAddresses[i]);
+
+      try tokenWithoutInterface.supportsInterface(0xd9b67a26) returns (bool hasInterface) {
+          if (hasInterface) {
+              IERC1155 token = IERC1155(tokensAddresses[i]);
+              bytes memory data;
+              token.safeTransferFrom(from, to, tokensIds[i], tokensValues[i], data);
+          } else {
+              IERC721 token = IERC721(tokensAddresses[i]);
+              try token.transferFrom(from, to, tokensIds[i]) {
+                // Success
+              } catch {
+                token.transfer(to, tokensIds[i]);
+              }
+          }
+      } catch {
+        IERC20 token = IERC20(tokensAddresses[i]);
+        try token.transferFrom(from, to, tokensAddresses[i]) {
+          //
+        } catch {
+          token.transfer(to, tokensIds[i]);
+        }
+      }
+    }
+  }
+}
