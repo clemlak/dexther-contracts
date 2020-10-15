@@ -25,7 +25,7 @@ contract Dexther is ERC721 {
   mapping (uint256 => uint256) public swappedWith;
   uint256 public currentBundleId;
 
-  // TODO: Add more events with indexed parameters to be able to fetch data
+  // TODO: Add more events with indexed parameters to be able to fetch data?
   event BundleCreated(
     address indexed creator,
     uint256 bundleId,
@@ -36,9 +36,19 @@ contract Dexther is ERC721 {
     uint256[] tokensValues
   );
 
-  event BundleSwapped(
+  event BundlesSwapped(
     uint256 initiatorBundleId,
     uint256 counterpartyBundleId
+  );
+
+  event InitiatorBundleClaimed(
+    uint256 initiatorBundleId,
+    uint256 counterpartyBundleId,
+    bool assetsClaimed
+  );
+
+  event BundleFinalized(
+    uint256 bundleId
   );
 
   constructor(
@@ -108,8 +118,8 @@ contract Dexther is ERC721 {
 
     require(
       bundles[initiatorBundleId].collateralAmount >= bundles[counterpartyBundleId].collateralAmount,
-      "Bundle values is too low"
-    )
+      "Bundle value is too low"
+    );
 
     swappedWith[initiatorBundleId] = counterpartyBundleId;
     swappedWith[counterpartyBundleId] = initiatorBundleId;
@@ -131,7 +141,7 @@ contract Dexther is ERC721 {
     );
   }
 
-  function finalizeBundle(
+  function claimInitiatorBundle(
     uint256 initiatorBundleId,
     uint256 counterpartyBundleId,
     bool claimingAssets
@@ -141,25 +151,73 @@ contract Dexther is ERC721 {
     require(bundles[initiatorBundleId].status == BundleStatus.Initiator, "Bundle not initiator");
     require(bundles[counterpartyBundleId].status == BundleStatus.Counterparty, "Bundle not counterparty");
 
-    require(swappedWith[initatorBundleId] == counterpartyBundleId, "Bundles not swapped together");
-    require(swappedWith[counterpartyBundleId] == initatorBundleId, "Bundles not swapped together");
+    require(swappedWith[initiatorBundleId] == counterpartyBundleId, "Bundles not swapped together");
+    require(swappedWith[counterpartyBundleId] == initiatorBundleId, "Bundles not swapped together");
 
-    address from = claimingAssets ? ownerOf(counterpartyBundleId) : ownerOf(initiatorBundleId);
-    address to = claimingAssets ? ownerOf(initiatorBundleId) : ownerOf(counterpartyBundleId);
+    if (claimingAssets) {
+      _transferAssets(
+        address(this),
+        msg.sender,
+        bundles[initiatorBundleId].tokensAddresses,
+        bundles[initiatorBundleId].tokensIds,
+        bundles[initiatorBundleId].tokensValues
+      );
 
-    _transferAssets(
-      address(this),
-      msg.sender,
-      bundles[initiatorBundleId].tokensAddresses,
-      bundles[initiatorBundleId].tokensIds,
-      bundles[initiatorBundleId].tokensValues
-    );
+      bundles[initiatorBundleId].status = BundleStatus.AssetsTaken;
+    } else {
+      IERC20 initiatorCollateralToken = IERC20(bundles[initiatorBundleId].collateralTokenAddress);
+      initiatorCollateralToken.transfer(msg.sender, bundles[initiatorBundleId].collateralAmount);
 
-    IERC20 initiatorCollateralToken = IERC20(bundles[initiatorBundleId].collateralTokenAddress);
-    initiatorCollateralToken.transfer(msg.sender, bundles[initiatorBundleId].collateralAmount);
+      bundles[initiatorBundleId].status = BundleStatus.CollateralTaken;
+    }
 
     IERC20 counterpartyCollateralToken = IERC20(bundles[counterpartyBundleId].collateralTokenAddress);
     counterpartyCollateralToken.transfer(msg.sender, bundles[counterpartyBundleId].collateralAmount);
+
+    bundles[counterpartyBundleId].status = BundleStatus.Finalized;
+
+    emit InitiatorBundleClaimed(
+      initiatorBundleId,
+      counterpartyBundleId,
+      claimingAssets
+    );
+  }
+
+  function finalizeBundle(
+    uint256 initiatorBundleId,
+    uint256 counterpartyBundleId
+  ) external {
+    require(ownerOf(initiatorBundleId) == msg.sender, "Not owner");
+
+    require(
+      bundles[initiatorBundleId].status == BundleStatus.CollateralTaken
+      || bundles[initiatorBundleId].status == BundleStatus.AssetsTaken,
+      "Bundle not claimed yet"
+    );
+    require(
+      bundles[counterpartyBundleId].status == BundleStatus.Finalized,
+      "Counterparty bundle not finalized"
+    );
+
+    require(swappedWith[initiatorBundleId] == counterpartyBundleId, "Bundles not swapped together");
+    require(swappedWith[counterpartyBundleId] == initiatorBundleId, "Bundles not swapped together");
+
+    if (bundles[initiatorBundleId].status == BundleStatus.AssetsTaken) {
+      IERC20 initiatorCollateralToken = IERC20(bundles[initiatorBundleId].collateralTokenAddress);
+      initiatorCollateralToken.transfer(msg.sender, bundles[initiatorBundleId].collateralAmount);
+    } else {
+      _transferAssets(
+        address(this),
+        msg.sender,
+        bundles[initiatorBundleId].tokensAddresses,
+        bundles[initiatorBundleId].tokensIds,
+        bundles[initiatorBundleId].tokensValues
+      );
+    }
+
+    bundles[initiatorBundleId].status = BundleStatus.Finalized;
+
+    emit BundleFinalized(initiatorBundleId);
   }
 
   function _transferAssets(
