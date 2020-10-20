@@ -4,250 +4,172 @@ pragma experimental ABIEncoderV2;
 
 import "@openzeppelin/contracts/introspection/IERC165.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 
 
-contract Dexther is ERC721 {
-  enum Status { Available, Initiator, Counterparty, CollateralTaken, AssetsTaken, Finalized }
+contract Dexther {
+  enum Status { Available, Swapped, Finalized }
 
-  struct CNFT {
-    uint256 collateralAmount;
-    address collateralTokenAddress;
-    address[] tokensAddresses;
-    uint256[] tokensIds;
-    uint256[] tokensValues;
-    Status status;
+  struct Offer {
+    address creator;
+    uint256 estimateAmount;
+    address estimateTokenAddress;
+    address[] offerTokensAddresses;
+    uint256[] offferTokensIds;
+    uint256[] offerTokensValues;
+    address swapper;
     uint256 swappedAt;
+    address[] swapTokensAddresses;
+    uint256[] swapTokensIds;
+    uint256[] swapTokensValues;
+    Status status;
   }
 
-  CNFT[] public cNFTS;
-  mapping (uint256 => uint256) public swappedWith;
-  uint256 public currentCNFTId;
-  uint256 public forceDelay = 60 * 60 * 24 * 10;
+  Offer[] public offers;
+  uint256 public choicePeriod = 60 * 60 * 24 * 10;
 
-  event Deposited(
-    address creator,
-    uint256 indexed cNFTId,
-    uint256 indexed collateralAmount,
-    address indexed collateralTokenAddress,
-    address[] tokensAddresses,
-    uint256[] tokensIds,
-    uint256[] tokensValues
+  event Created(
+    address indexed creator,
+    uint256 indexed offerId,
+    uint256 estimateAmount,
+    address indexed estimateTokenAddress,
+    address[] offerTokensAddresses,
+    uint256[] offersTokensIds,
+    uint256[] offerTokensValues
   );
 
   event Swapped(
-    uint256 indexed initiatorCNFTId,
-    uint256 indexed counterpartyCNFTId
+    address indexed swapper,
+    uint256 indexed offerId
   );
 
-  event Claimed(
-    uint256 indexed initiatorCNFTId,
-    uint256 indexed counterpartyCNFTId,
-    bool indexed assetsClaimed
-  );
-
-  event Finalized(
-    uint256 indexed cNFTId
-  );
-
-  constructor(
-    string memory initialBaseURI
-  ) ERC721(
-    "Dexther Collateralized NFT",
-    "cNFT"
-  ) {
-    _setBaseURI(initialBaseURI);
-  }
-
-  function deposit(
-    uint256 collateralAmount,
-    address collateralTokenAddress,
-    address[] memory tokensAddresses,
-    uint256[] memory tokensIds,
-    uint256[] memory tokensValues
+  function createOffer(
+    uint256 estimateAmount,
+    address estimateTokenAddress,
+    address[] memory offerTokensAddresses,
+    uint256[] memory offerTokensIds,
+    uint256[] memory offerTokensValues
   ) external {
-    IERC20 collateralToken = IERC20(collateralTokenAddress);
-    collateralToken.transferFrom(msg.sender, address(this), collateralAmount);
-
-    require(tokensAddresses.length > 0, "No assets");
-    require(tokensAddresses.length == tokensIds.length, "Tokens addresses or ids issue");
-    require(tokensAddresses.length == tokensValues.length, "Tokens addresses or values issue");
+    require(offerTokensAddresses.length > 0, "No assets");
+    require(offerTokensAddresses.length == offerTokensIds.length, "Tokens addresses or ids error");
+    require(offerTokensAddresses.length == offerTokensValues.length, "Tokens addresses or values error");
 
     _transferAssets(
       msg.sender,
       address(this),
-      tokensAddresses,
-      tokensIds,
-      tokensValues
+      offerTokensAddresses,
+      offerTokensIds,
+      offerTokensValues
     );
 
-    _mint(msg.sender, currentCNFTId);
-
-    cNFTS.push(
-       CNFT(
-        collateralAmount,
-        collateralTokenAddress,
-        tokensAddresses,
-        tokensIds,
-        tokensValues,
-        Status.Available,
+    offers.push(
+      Offer(
+        msg.sender,
+        estimateAmount,
+        estimateTokenAddress,
+        offerTokensAddresses,
+        offerTokensIds,
+        offerTokensValues,
+        address(0),
         0,
+        new address[](0),
+        new uint256[](0),
+        new uint256[](0),
+        Status.Available
       )
     );
 
-    emit Deposited(
+    emit Created(
       msg.sender,
-      currentCNFTId,
-      collateralAmount,
-      collateralTokenAddress,
-      tokensAddresses,
-      tokensIds,
-      tokensValues
+      offers.length - 1,
+      estimateAmount,
+      estimateTokenAddress,
+      offerTokensAddresses,
+      offerTokensIds,
+      offerTokensValues
     );
-
-    currentCNFTId += 1;
   }
 
   function swap(
-    uint256 initiatorCNFTId,
-    uint256 counterpartyCNFTId
+    uint256 offerId,
+    address[] memory swapTokensAddresses,
+    uint256[] memory swapTokensIds,
+    uint256[] memory swapTokensValues
   ) external {
-    require(cNFTS[initiatorCNFTId].status == Status.Available, "CNFT initiator not available");
-    require(cNFTS[counterpartyCNFTId].status == Status.Available, "CNFT counterparty not available");
-    require(ownerOf(initiatorCNFTId) == msg.sender, "Not owner");
+    require(offers[offerId].status == Status.Available, "Offer not available");
 
-    require(
-      cNFTS[initiatorCNFTId].collateralAmount >= cNFTS[counterpartyCNFTId].collateralAmount,
-      "Value is too low"
-    );
-
-    swappedWith[initiatorCNFTId] = counterpartyCNFTId;
-    swappedWith[counterpartyCNFTId] = initiatorCNFTId;
-
-    cNFTS[initiatorCNFTId].status = Status.Initiator;
-    cNFTS[counterpartyCNFTId].status = Status.Counterparty;
-
-    cNFTS[initiatorCNFTId].swappedAt = block.timestamp;
-    cNFTS[counterpartyCNFTId].swappedAt = block.timestamp;
+    IERC20 estimateToken = IERC20(offers[offerId].estimateTokenAddress);
+    estimateToken.transferFrom(msg.sender, address(this), offers[offerId].estimateAmount);
 
     _transferAssets(
-      address(this),
       msg.sender,
-      cNFTS[counterpartyCNFTId].tokensAddresses,
-      cNFTS[counterpartyCNFTId].tokensIds,
-      cNFTS[counterpartyCNFTId].tokensValues
+      address(this),
+      swapTokensAddresses,
+      swapTokensIds,
+      swapTokensValues
     );
+
+    offers[offerId].swapper = msg.sender;
+    offers[offerId].swappedAt = block.timestamp;
+    offers[offerId].status = Status.Swapped;
+    offers[offerId].swapTokensAddresses = swapTokensAddresses;
+    offers[offerId].swapTokensIds = swapTokensIds;
+    offers[offerId].swapTokensValues = swapTokensValues;
 
     emit Swapped(
-      initiatorCNFTId,
-      counterpartyCNFTId
-    );
-  }
-
-  function claim(
-    uint256 initiatorCNFTId,
-    uint256 counterpartyCNFTId,
-    bool claimingAssets
-  ) external {
-    require(ownerOf(counterpartyCNFTId) == msg.sender, "Not owner");
-
-    require(cNFTS[initiatorCNFTId].status == Status.Initiator, "CNFT not initiator");
-    require(cNFTS[counterpartyCNFTId].status == Status.Counterparty, "CNFT not counterparty");
-
-    require(swappedWith[initiatorCNFTId] == counterpartyCNFTId, "cNFTS not swapped together");
-    require(swappedWith[counterpartyCNFTId] == initiatorCNFTId, "cNFTS not swapped together");
-
-    if (claimingAssets) {
-      _transferAssets(
-        address(this),
-        msg.sender,
-        cNFTS[initiatorCNFTId].tokensAddresses,
-        cNFTS[initiatorCNFTId].tokensIds,
-        cNFTS[initiatorCNFTId].tokensValues
-      );
-
-      cNFTS[initiatorCNFTId].status = Status.AssetsTaken;
-    } else {
-      IERC20 initiatorCollateralToken = IERC20(cNFTS[initiatorCNFTId].collateralTokenAddress);
-      initiatorCollateralToken.transfer(msg.sender, cNFTS[initiatorCNFTId].collateralAmount);
-
-      cNFTS[initiatorCNFTId].status = Status.CollateralTaken;
-    }
-
-    IERC20 counterpartyCollateralToken = IERC20(cNFTS[counterpartyCNFTId].collateralTokenAddress);
-    counterpartyCollateralToken.transfer(msg.sender, cNFTS[counterpartyCNFTId].collateralAmount);
-
-    cNFTS[counterpartyCNFTId].status = Status.Finalized;
-
-    emit Claimed(
-      initiatorCNFTId,
-      counterpartyCNFTId,
-      claimingAssets
+      msg.sender,
+      offerId
     );
   }
 
   function finalize(
-    uint256 initiatorCNFTId,
-    uint256 counterpartyCNFTId
-  ) external {
-    require(ownerOf(initiatorCNFTId) == msg.sender, "Not owner");
-
-    require(
-      cNFTS[initiatorCNFTId].status == Status.CollateralTaken
-      || cNFTS[initiatorCNFTId].status == Status.AssetsTaken,
-      "CNFT not claimed yet"
-    );
-    require(
-      cNFTS[counterpartyCNFTId].status == Status.Finalized,
-      "Counterparty CNFT not finalized"
-    );
-
-    require(swappedWith[initiatorCNFTId] == counterpartyCNFTId, "cNFTS not swapped together");
-    require(swappedWith[counterpartyCNFTId] == initiatorCNFTId, "cNFTS not swapped together");
-
-    if (cNFTS[initiatorCNFTId].status == Status.AssetsTaken) {
-      IERC20 initiatorCollateralToken = IERC20(cNFTS[initiatorCNFTId].collateralTokenAddress);
-      initiatorCollateralToken.transfer(msg.sender, cNFTS[initiatorCNFTId].collateralAmount);
-    } else {
-      _transferAssets(
-        address(this),
-        msg.sender,
-        cNFTS[initiatorCNFTId].tokensAddresses,
-        cNFTS[initiatorCNFTId].tokensIds,
-        cNFTS[initiatorCNFTId].tokensValues
-      );
-    }
-
-    cNFTS[initiatorCNFTId].status = Status.Finalized;
-
-    _burn(initiatorCNFTId);
-    _burn(counterpartyCNFTId);
-
-    emit Finalized(initiatorCNFTId);
-  }
-
-  function forceFinalize(
-    uint256 initiatorCNFTId,
-    uint256 counterpartyCNFTId,
+    uint256 offerId,
     bool claimingAssets
   ) external {
-    require(ownerOf(initiatorCNFTId) == msg.sender, "Not owner");
+    require(msg.sender == offers[offerId].creator, "Not creator");
+    require(offers[offerId].status == Status.Swapped, "Not swapped");
 
-    require(cNFTS[initiatorCNFTId].status == Status.Initiator, "CNFT not initiator");
-    require(cNFTS[counterpartyCNFTId].status == Status.Counterparty, "CNFT not counterparty");
+    address assetsReceiver = claimingAssets ? msg.sender : offers[offerId].swapper;
+    address collateralReceiver = claimingAssets ? offers[offerId].swapper : msg.sender;
 
-    require(swappedWith[initiatorCNFTId] == counterpartyCNFTId, "cNFTS not swapped together");
-    require(swappedWith[counterpartyCNFTId] == initiatorCNFTId, "cNFTS not swapped together");
+    _transferAssets(
+      address(this),
+      assetsReceiver,
+      offers[offerId].swapTokensAddresses,
+      offers[offerId].swapTokensIds,
+      offers[offerId].swapTokensValues
+    );
 
-    require(block.timestamp + forceDelay >= cNFTS[counterpartyCNFTId].swappedAt, "Too soon");
-    require(block.timestamp + forceDelay >= cNFTS[initiatorCNFTId].swappedAt, "Too soon");
+    IERC20 estimateToken = IERC20(offers[offerId].estimateTokenAddress);
+    estimateToken.transferFrom(address(this), collateralReceiver, offers[offerId].estimateAmount);
 
-    address assetsReceiver = claimingAssets ? msg.sender : ownerOf(counterpartyCNFTId);
-    address initiatorCollateralReceiver = claimingAssets ?
-    address counterpartyCollateralReceiver;
+    offers[offerId].status = Status.Finalized;
+  }
 
+  function forceChoice(
+    uint256 offerId,
+    bool claimingAssets
+  ) external {
+    require(msg.sender == offers[offerId].swapper, "Not swapper");
+    require(offers[offerId].status == Status.Swapped, "Not swapped");
+    require(block.timestamp + choicePeriod >= offers[offerId].swappedAt, "Too soon");
+
+    address assetsReceiver = claimingAssets ? offers[offerId].swapper : msg.sender;
+    address collateralReceiver = claimingAssets ? msg.sender : offers[offerId].swapper;
+
+    _transferAssets(
+      address(this),
+      assetsReceiver,
+      offers[offerId].swapTokensAddresses,
+      offers[offerId].swapTokensIds,
+      offers[offerId].swapTokensValues
+    );
+
+    IERC20 estimateToken = IERC20(offers[offerId].estimateTokenAddress);
+    estimateToken.transferFrom(address(this), collateralReceiver, offers[offerId].estimateAmount);
+
+    offers[offerId].status = Status.Finalized;
   }
 
   function _transferAssets(
