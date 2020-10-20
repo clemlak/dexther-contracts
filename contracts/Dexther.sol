@@ -10,25 +10,26 @@ import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 
 
 contract Dexther is ERC721 {
-  enum BundleStatus { Available, Initiator, Counterparty, CollateralTaken, AssetsTaken, Finalized }
+  enum Status { Available, Initiator, Counterparty, CollateralTaken, AssetsTaken, Finalized }
 
-  struct Bundle {
+  struct CNFT {
     uint256 collateralAmount;
     address collateralTokenAddress;
     address[] tokensAddresses;
     uint256[] tokensIds;
     uint256[] tokensValues;
-    BundleStatus status;
+    Status status;
+    uint256 swappedAt;
   }
 
-  Bundle[] public bundles;
+  CNFT[] public cNFTS;
   mapping (uint256 => uint256) public swappedWith;
-  uint256 public currentBundleId;
+  uint256 public currentCNFTId;
+  uint256 public forceDelay = 60 * 60 * 24 * 10;
 
-  // TODO: Add more events with indexed parameters to be able to fetch data?
-  event BundleCreated(
-    address indexed creator,
-    uint256 bundleId,
+  event Deposited(
+    address creator,
+    uint256 indexed cNFTId,
     uint256 indexed collateralAmount,
     address indexed collateralTokenAddress,
     address[] tokensAddresses,
@@ -36,19 +37,19 @@ contract Dexther is ERC721 {
     uint256[] tokensValues
   );
 
-  event BundlesSwapped(
-    uint256 initiatorBundleId,
-    uint256 counterpartyBundleId
+  event Swapped(
+    uint256 indexed initiatorCNFTId,
+    uint256 indexed counterpartyCNFTId
   );
 
-  event InitiatorBundleClaimed(
-    uint256 initiatorBundleId,
-    uint256 counterpartyBundleId,
-    bool assetsClaimed
+  event Claimed(
+    uint256 indexed initiatorCNFTId,
+    uint256 indexed counterpartyCNFTId,
+    bool indexed assetsClaimed
   );
 
-  event BundleFinalized(
-    uint256 bundleId
+  event Finalized(
+    uint256 indexed cNFTId
   );
 
   constructor(
@@ -60,7 +61,7 @@ contract Dexther is ERC721 {
     _setBaseURI(initialBaseURI);
   }
 
-  function createBundle(
+  function deposit(
     uint256 collateralAmount,
     address collateralTokenAddress,
     address[] memory tokensAddresses,
@@ -82,22 +83,23 @@ contract Dexther is ERC721 {
       tokensValues
     );
 
-    _mint(msg.sender, currentBundleId);
+    _mint(msg.sender, currentCNFTId);
 
-    bundles.push(
-       Bundle(
+    cNFTS.push(
+       CNFT(
         collateralAmount,
         collateralTokenAddress,
         tokensAddresses,
         tokensIds,
         tokensValues,
-        BundleStatus.Available
+        Status.Available,
+        0,
       )
     );
 
-    emit BundleCreated(
+    emit Deposited(
       msg.sender,
-      currentBundleId,
+      currentCNFTId,
       collateralAmount,
       collateralTokenAddress,
       tokensAddresses,
@@ -105,119 +107,147 @@ contract Dexther is ERC721 {
       tokensValues
     );
 
-    currentBundleId += 1;
+    currentCNFTId += 1;
   }
 
-  function swapBundles(
-    uint256 initiatorBundleId,
-    uint256 counterpartyBundleId
+  function swap(
+    uint256 initiatorCNFTId,
+    uint256 counterpartyCNFTId
   ) external {
-    require(bundles[initiatorBundleId].status == BundleStatus.Available, "Bundle not available");
-    require(bundles[counterpartyBundleId].status == BundleStatus.Available, "Bundle not available");
-    require(ownerOf(initiatorBundleId) == msg.sender, "Not owner");
+    require(cNFTS[initiatorCNFTId].status == Status.Available, "CNFT initiator not available");
+    require(cNFTS[counterpartyCNFTId].status == Status.Available, "CNFT counterparty not available");
+    require(ownerOf(initiatorCNFTId) == msg.sender, "Not owner");
 
     require(
-      bundles[initiatorBundleId].collateralAmount >= bundles[counterpartyBundleId].collateralAmount,
-      "Bundle value is too low"
+      cNFTS[initiatorCNFTId].collateralAmount >= cNFTS[counterpartyCNFTId].collateralAmount,
+      "Value is too low"
     );
 
-    swappedWith[initiatorBundleId] = counterpartyBundleId;
-    swappedWith[counterpartyBundleId] = initiatorBundleId;
+    swappedWith[initiatorCNFTId] = counterpartyCNFTId;
+    swappedWith[counterpartyCNFTId] = initiatorCNFTId;
 
-    bundles[initiatorBundleId].status = BundleStatus.Initiator;
-    bundles[counterpartyBundleId].status = BundleStatus.Counterparty;
+    cNFTS[initiatorCNFTId].status = Status.Initiator;
+    cNFTS[counterpartyCNFTId].status = Status.Counterparty;
+
+    cNFTS[initiatorCNFTId].swappedAt = block.timestamp;
+    cNFTS[counterpartyCNFTId].swappedAt = block.timestamp;
 
     _transferAssets(
       address(this),
       msg.sender,
-      bundles[counterpartyBundleId].tokensAddresses,
-      bundles[counterpartyBundleId].tokensIds,
-      bundles[counterpartyBundleId].tokensValues
+      cNFTS[counterpartyCNFTId].tokensAddresses,
+      cNFTS[counterpartyCNFTId].tokensIds,
+      cNFTS[counterpartyCNFTId].tokensValues
     );
 
-    emit BundlesSwapped(
-      initiatorBundleId,
-      counterpartyBundleId
+    emit Swapped(
+      initiatorCNFTId,
+      counterpartyCNFTId
     );
   }
 
-  function claimInitiatorBundle(
-    uint256 initiatorBundleId,
-    uint256 counterpartyBundleId,
+  function claim(
+    uint256 initiatorCNFTId,
+    uint256 counterpartyCNFTId,
     bool claimingAssets
   ) external {
-    require(ownerOf(counterpartyBundleId) == msg.sender, "Not owner");
+    require(ownerOf(counterpartyCNFTId) == msg.sender, "Not owner");
 
-    require(bundles[initiatorBundleId].status == BundleStatus.Initiator, "Bundle not initiator");
-    require(bundles[counterpartyBundleId].status == BundleStatus.Counterparty, "Bundle not counterparty");
+    require(cNFTS[initiatorCNFTId].status == Status.Initiator, "CNFT not initiator");
+    require(cNFTS[counterpartyCNFTId].status == Status.Counterparty, "CNFT not counterparty");
 
-    require(swappedWith[initiatorBundleId] == counterpartyBundleId, "Bundles not swapped together");
-    require(swappedWith[counterpartyBundleId] == initiatorBundleId, "Bundles not swapped together");
+    require(swappedWith[initiatorCNFTId] == counterpartyCNFTId, "cNFTS not swapped together");
+    require(swappedWith[counterpartyCNFTId] == initiatorCNFTId, "cNFTS not swapped together");
 
     if (claimingAssets) {
       _transferAssets(
         address(this),
         msg.sender,
-        bundles[initiatorBundleId].tokensAddresses,
-        bundles[initiatorBundleId].tokensIds,
-        bundles[initiatorBundleId].tokensValues
+        cNFTS[initiatorCNFTId].tokensAddresses,
+        cNFTS[initiatorCNFTId].tokensIds,
+        cNFTS[initiatorCNFTId].tokensValues
       );
 
-      bundles[initiatorBundleId].status = BundleStatus.AssetsTaken;
+      cNFTS[initiatorCNFTId].status = Status.AssetsTaken;
     } else {
-      IERC20 initiatorCollateralToken = IERC20(bundles[initiatorBundleId].collateralTokenAddress);
-      initiatorCollateralToken.transfer(msg.sender, bundles[initiatorBundleId].collateralAmount);
+      IERC20 initiatorCollateralToken = IERC20(cNFTS[initiatorCNFTId].collateralTokenAddress);
+      initiatorCollateralToken.transfer(msg.sender, cNFTS[initiatorCNFTId].collateralAmount);
 
-      bundles[initiatorBundleId].status = BundleStatus.CollateralTaken;
+      cNFTS[initiatorCNFTId].status = Status.CollateralTaken;
     }
 
-    IERC20 counterpartyCollateralToken = IERC20(bundles[counterpartyBundleId].collateralTokenAddress);
-    counterpartyCollateralToken.transfer(msg.sender, bundles[counterpartyBundleId].collateralAmount);
+    IERC20 counterpartyCollateralToken = IERC20(cNFTS[counterpartyCNFTId].collateralTokenAddress);
+    counterpartyCollateralToken.transfer(msg.sender, cNFTS[counterpartyCNFTId].collateralAmount);
 
-    bundles[counterpartyBundleId].status = BundleStatus.Finalized;
+    cNFTS[counterpartyCNFTId].status = Status.Finalized;
 
-    emit InitiatorBundleClaimed(
-      initiatorBundleId,
-      counterpartyBundleId,
+    emit Claimed(
+      initiatorCNFTId,
+      counterpartyCNFTId,
       claimingAssets
     );
   }
 
-  function finalizeBundle(
-    uint256 initiatorBundleId,
-    uint256 counterpartyBundleId
+  function finalize(
+    uint256 initiatorCNFTId,
+    uint256 counterpartyCNFTId
   ) external {
-    require(ownerOf(initiatorBundleId) == msg.sender, "Not owner");
+    require(ownerOf(initiatorCNFTId) == msg.sender, "Not owner");
 
     require(
-      bundles[initiatorBundleId].status == BundleStatus.CollateralTaken
-      || bundles[initiatorBundleId].status == BundleStatus.AssetsTaken,
-      "Bundle not claimed yet"
+      cNFTS[initiatorCNFTId].status == Status.CollateralTaken
+      || cNFTS[initiatorCNFTId].status == Status.AssetsTaken,
+      "CNFT not claimed yet"
     );
     require(
-      bundles[counterpartyBundleId].status == BundleStatus.Finalized,
-      "Counterparty bundle not finalized"
+      cNFTS[counterpartyCNFTId].status == Status.Finalized,
+      "Counterparty CNFT not finalized"
     );
 
-    require(swappedWith[initiatorBundleId] == counterpartyBundleId, "Bundles not swapped together");
-    require(swappedWith[counterpartyBundleId] == initiatorBundleId, "Bundles not swapped together");
+    require(swappedWith[initiatorCNFTId] == counterpartyCNFTId, "cNFTS not swapped together");
+    require(swappedWith[counterpartyCNFTId] == initiatorCNFTId, "cNFTS not swapped together");
 
-    if (bundles[initiatorBundleId].status == BundleStatus.AssetsTaken) {
-      IERC20 initiatorCollateralToken = IERC20(bundles[initiatorBundleId].collateralTokenAddress);
-      initiatorCollateralToken.transfer(msg.sender, bundles[initiatorBundleId].collateralAmount);
+    if (cNFTS[initiatorCNFTId].status == Status.AssetsTaken) {
+      IERC20 initiatorCollateralToken = IERC20(cNFTS[initiatorCNFTId].collateralTokenAddress);
+      initiatorCollateralToken.transfer(msg.sender, cNFTS[initiatorCNFTId].collateralAmount);
     } else {
       _transferAssets(
         address(this),
         msg.sender,
-        bundles[initiatorBundleId].tokensAddresses,
-        bundles[initiatorBundleId].tokensIds,
-        bundles[initiatorBundleId].tokensValues
+        cNFTS[initiatorCNFTId].tokensAddresses,
+        cNFTS[initiatorCNFTId].tokensIds,
+        cNFTS[initiatorCNFTId].tokensValues
       );
     }
 
-    bundles[initiatorBundleId].status = BundleStatus.Finalized;
+    cNFTS[initiatorCNFTId].status = Status.Finalized;
 
-    emit BundleFinalized(initiatorBundleId);
+    _burn(initiatorCNFTId);
+    _burn(counterpartyCNFTId);
+
+    emit Finalized(initiatorCNFTId);
+  }
+
+  function forceFinalize(
+    uint256 initiatorCNFTId,
+    uint256 counterpartyCNFTId,
+    bool claimingAssets
+  ) external {
+    require(ownerOf(initiatorCNFTId) == msg.sender, "Not owner");
+
+    require(cNFTS[initiatorCNFTId].status == Status.Initiator, "CNFT not initiator");
+    require(cNFTS[counterpartyCNFTId].status == Status.Counterparty, "CNFT not counterparty");
+
+    require(swappedWith[initiatorCNFTId] == counterpartyCNFTId, "cNFTS not swapped together");
+    require(swappedWith[counterpartyCNFTId] == initiatorCNFTId, "cNFTS not swapped together");
+
+    require(block.timestamp + forceDelay >= cNFTS[counterpartyCNFTId].swappedAt, "Too soon");
+    require(block.timestamp + forceDelay >= cNFTS[initiatorCNFTId].swappedAt, "Too soon");
+
+    address assetsReceiver = claimingAssets ? msg.sender : ownerOf(counterpartyCNFTId);
+    address initiatorCollateralReceiver = claimingAssets ?
+    address counterpartyCollateralReceiver;
+
   }
 
   function _transferAssets(
