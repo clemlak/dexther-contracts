@@ -18,6 +18,8 @@ contract Dexther {
     address[] offerTokensAddresses;
     uint256[] offferTokensIds;
     uint256[] offerTokensValues;
+    address[] expectedTokens;
+    address restrictedTo;
     address swapper;
     uint256 swappedAt;
     address[] swapTokensAddresses;
@@ -36,7 +38,9 @@ contract Dexther {
     address indexed estimateTokenAddress,
     address[] offerTokensAddresses,
     uint256[] offersTokensIds,
-    uint256[] offerTokensValues
+    uint256[] offerTokensValues,
+    address[] expectedTokens,
+    address restrictedTo
   );
 
   event Swapped(
@@ -49,7 +53,9 @@ contract Dexther {
     address estimateTokenAddress,
     address[] memory offerTokensAddresses,
     uint256[] memory offerTokensIds,
-    uint256[] memory offerTokensValues
+    uint256[] memory offerTokensValues,
+    address[] memory expectedTokens,
+    address restrictedTo
   ) external {
     require(offerTokensAddresses.length > 0, "No assets");
     require(offerTokensAddresses.length == offerTokensIds.length, "Tokens addresses or ids error");
@@ -71,6 +77,8 @@ contract Dexther {
         offerTokensAddresses,
         offerTokensIds,
         offerTokensValues,
+        expectedTokens,
+        restrictedTo,
         address(0),
         0,
         new address[](0),
@@ -87,7 +95,9 @@ contract Dexther {
       estimateTokenAddress,
       offerTokensAddresses,
       offerTokensIds,
-      offerTokensValues
+      offerTokensValues,
+      expectedTokens,
+      restrictedTo
     );
   }
 
@@ -98,6 +108,19 @@ contract Dexther {
     uint256[] memory swapTokensValues
   ) external {
     require(offers[offerId].status == Status.Available, "Offer not available");
+
+    if (offers[offerId].restrictedTo != address(0)) {
+      require(offers[offerId].restrictedTo == msg.sender, "Not authorized");
+    }
+
+    if (offers[offerId].expectedTokens.length > 0) {
+      for (uint256 i = 0; i < swapTokensAddresses.length; i += 1) {
+        require(
+          includes(offers[offerId].expectedTokens, swapTokensAddresses[i]),
+          "Swap token not expected"
+        );
+      }
+    }
 
     IERC20 estimateToken = IERC20(offers[offerId].estimateTokenAddress);
     estimateToken.transferFrom(msg.sender, address(this), offers[offerId].estimateAmount);
@@ -204,5 +227,20 @@ contract Dexther {
         }
       }
     }
+  }
+
+  function includes(
+    address[] memory source,
+    address value
+  ) private pure returns (bool) {
+    bool isIncluded = false;
+
+    for (uint256 i = 0; i < source.length; i += 1) {
+      if (source[i] == value) {
+        isIncluded = true;
+      }
+    }
+
+    return isIncluded;
   }
 }

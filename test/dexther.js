@@ -5,6 +5,7 @@ const {
 } = require('@openzeppelin/test-helpers');
 const {
   utils,
+  constants,
 } = require('ethers');
 
 const Dexther = artifacts.require('Dexther');
@@ -35,6 +36,8 @@ contract('Dexther', (accounts) => {
       [dummyERC721.address],
       [0],
       [0],
+      [],
+      constants.AddressZero,
     );
 
     /*
@@ -63,6 +66,8 @@ contract('Dexther', (accounts) => {
       [dummyERC721.address],
       [0],
       [1],
+      [],
+      constants.AddressZero,
     );
 
     await dummyERC721.mint(accounts[1], 1);
