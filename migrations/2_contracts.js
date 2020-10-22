@@ -11,5 +11,7 @@ module.exports = (deployer, network) => {
     deployer.deploy(DummyERC20);
     deployer.deploy(DummyERC721);
     deployer.deploy(DummyERC1155);
+  } else {
+    deployer.deploy(Dexther);
   }
 };
