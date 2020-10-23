@@ -9,7 +9,7 @@ import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 
 
 contract Dexther {
-  enum Status { Available, Swapped, Finalized }
+  enum Status { Available, Swapped, Finalized, Canceled }
 
   struct Offer {
     address creator;
@@ -41,6 +41,10 @@ contract Dexther {
     uint256[] offerTokensValues,
     address[] expectedTokens,
     address restrictedTo
+  );
+
+  event Canceled(
+    uint256 indexed offerId
   );
 
   event Swapped(
@@ -99,6 +103,17 @@ contract Dexther {
       expectedTokens,
       restrictedTo
     );
+  }
+
+  function cancelOffer(
+    uint256 offerId
+  ) external {
+    require(offers[offerId].creator == msg.sender, "Not creator");
+    require(offers[offerId].status == Status.Available, "Already used");
+
+    offers[offerId].status = Status.Canceled;
+
+    emit Canceled(offerId);
   }
 
   function swap(
