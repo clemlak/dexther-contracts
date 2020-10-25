@@ -18,7 +18,7 @@ contract Dexther {
     uint256 estimateAmount;
     address estimateTokenAddress;
     address[] offerTokensAddresses;
-    uint256[] offferTokensIds;
+    uint256[] offerTokensIds;
     uint256[] offerTokensValues;
     address[] expectedTokens;
     address restrictedTo;
@@ -151,7 +151,7 @@ contract Dexther {
       address(this),
       msg.sender,
       offers[offerId].offerTokensAddresses,
-      offers[offerId].offferTokensIds,
+      offers[offerId].offerTokensIds,
       offers[offerId].offerTokensValues
     );
   }
@@ -192,7 +192,7 @@ contract Dexther {
       address(this),
       msg.sender,
       offers[offerId].offerTokensAddresses,
-      offers[offerId].offferTokensIds,
+      offers[offerId].offerTokensIds,
       offers[offerId].offerTokensValues
     );
 
