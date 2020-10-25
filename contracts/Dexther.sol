@@ -7,6 +7,8 @@ import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 
+import "@openzeppelin/contracts/math/SafeMath.sol";
+
 
 contract Dexther {
   enum Status { Available, Swapped, Finalized, Canceled }
@@ -31,6 +33,10 @@ contract Dexther {
   Offer[] public offers;
   uint256 public choicePeriod = 60 * 60 * 24 * 10;
 
+  uint256 public currentFee = 1;
+
+  address public owner;
+
   event Created(
     address indexed creator,
     uint256 indexed offerId,
@@ -51,6 +57,32 @@ contract Dexther {
     address indexed swapper,
     uint256 indexed offerId
   );
+
+  constructor() {
+    owner = msg.sender;
+  }
+
+  modifier onlyOwner() {
+    require(msg.sender == owner, "Not owner");
+    _;
+  }
+
+  function updateOwner(address newOwner) external onlyOwner() {
+    owner = newOwner;
+  }
+
+  function updateFee(uint256 newCurrentFee) external onlyOwner() {
+    require(newCurrentFee < 100, "Fee too high");
+    currentFee = newCurrentFee;
+  }
+
+  function withdrawFee(
+    address tokenAddress,
+    uint256 amount
+  ) external onlyOwner() {
+    IERC20 token = IERC20(tokenAddress);
+    token.transfer(msg.sender, amount);
+  }
 
   function createOffer(
     uint256 estimateAmount,
@@ -114,6 +146,14 @@ contract Dexther {
     offers[offerId].status = Status.Canceled;
 
     emit Canceled(offerId);
+
+    _transferAssets(
+      address(this),
+      msg.sender,
+      offers[offerId].offerTokensAddresses,
+      offers[offerId].offferTokensIds,
+      offers[offerId].offerTokensValues
+    );
   }
 
   function swap(
@@ -131,7 +171,7 @@ contract Dexther {
     if (offers[offerId].expectedTokens.length > 0) {
       for (uint256 i = 0; i < swapTokensAddresses.length; i += 1) {
         require(
-          includes(offers[offerId].expectedTokens, swapTokensAddresses[i]),
+          _includes(offers[offerId].expectedTokens, swapTokensAddresses[i]),
           "Swap token not expected"
         );
       }
@@ -146,6 +186,14 @@ contract Dexther {
       swapTokensAddresses,
       swapTokensIds,
       swapTokensValues
+    );
+
+    _transferAssets(
+      address(this),
+      msg.sender,
+      offers[offerId].offerTokensAddresses,
+      offers[offerId].offferTokensIds,
+      offers[offerId].offerTokensValues
     );
 
     offers[offerId].swapper = msg.sender;
@@ -180,7 +228,21 @@ contract Dexther {
     );
 
     IERC20 estimateToken = IERC20(offers[offerId].estimateTokenAddress);
-    estimateToken.transferFrom(address(this), collateralReceiver, offers[offerId].estimateAmount);
+
+    uint256 fee = SafeMath.mul(
+      SafeMath.div(
+        offers[offerId].estimateAmount,
+        10000
+      ),
+      currentFee
+    );
+
+    uint256 estimateAmountMinusFee = SafeMath.sub(
+      offers[offerId].estimateAmount,
+      fee
+    );
+
+    estimateToken.transferFrom(address(this), collateralReceiver, estimateAmountMinusFee);
 
     offers[offerId].status = Status.Finalized;
   }
@@ -208,6 +270,12 @@ contract Dexther {
     estimateToken.transferFrom(address(this), collateralReceiver, offers[offerId].estimateAmount);
 
     offers[offerId].status = Status.Finalized;
+  }
+
+  function getOffer(
+    uint256 offerId
+  ) external view returns (Offer memory) {
+    return offers[offerId];
   }
 
   function _transferAssets(
@@ -244,7 +312,7 @@ contract Dexther {
     }
   }
 
-  function includes(
+  function _includes(
     address[] memory source,
     address value
   ) private pure returns (bool) {

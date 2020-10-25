@@ -52,7 +52,7 @@ contract('Dexther', (accounts) => {
     });
     */
 
-    const offer = await instance.offers(0);
+    const offer = await instance.getOffer(0);
     console.log(offer);
   });
 
