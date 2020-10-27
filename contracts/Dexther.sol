@@ -297,7 +297,7 @@ contract Dexther {
       fee
     );
 
-    estimateToken.transfer(address(this), collateralReceiver, estimateAmountMinusFee);
+    estimateToken.transfer(collateralReceiver, estimateAmountMinusFee);
     offers[offerId].status = Status.Finalized;
   }
 

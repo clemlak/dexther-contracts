@@ -89,4 +89,43 @@ contract('Dexther', (accounts) => {
       },
     );
   });
+
+  it('Should create an offer and swap NFTs', async () => {
+    await dummyERC721.mint(accounts[0], 0);
+    await dummyERC721.approve(instance.address, 0);
+
+    await instance.createOffer(
+      web3.utils.toWei('100').toString(),
+      dummyERC20.address,
+      [dummyERC721.address],
+      [0],
+      [1],
+      [],
+      constants.AddressZero,
+    );
+
+    await dummyERC721.mint(accounts[1], 1);
+    await dummyERC721.approve(instance.address, 1, {
+      from: accounts[1],
+    });
+
+    await dummyERC20.mint(accounts[1], web3.utils.toWei('100'));
+    await dummyERC20.approve(instance.address, web3.utils.toWei('100'), {
+      from: accounts[1],
+    });
+
+    await instance.swap(
+      0,
+      [dummyERC721.address],
+      [1],
+      [0], {
+        from: accounts[1],
+      },
+    );
+
+    await instance.finalize(
+      0,
+      true,
+    );
+  });
 });
