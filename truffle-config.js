@@ -19,6 +19,13 @@ module.exports = {
       gas: 5500000,
       timeoutBlocks: 200,
     },
+    mumbai: {
+      provider: () => new HDWalletProvider(PRIVATE_KEY, 'https://rpc-mumbai.matic.today,'),
+      network_id: 80001,
+      confirmations: 2,
+      timeoutBlocks: 200,
+      skipDryRun: true,
+    },
   },
   mocha: {
     timeout: 100000,
