@@ -7,11 +7,11 @@ const DummyERC1155 = artifacts.require('DummyERC1155');
 
 module.exports = (deployer, network) => {
   if (network === 'development') {
-    deployer.deploy(Dexther);
+    deployer.deploy(Dexther, '0');
     deployer.deploy(DummyERC20);
     deployer.deploy(DummyERC721);
     deployer.deploy(DummyERC1155);
   } else {
-    deployer.deploy(Dexther);
+    deployer.deploy(Dexther, '0');
   }
 };

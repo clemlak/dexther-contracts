@@ -20,7 +20,7 @@ contract('Dexther', (accounts) => {
   let dummyERC1155;
 
   beforeEach(async () => {
-    instance = await Dexther.new();
+    instance = await Dexther.new('0');
     dummyERC20 = await DummyERC20.new();
     dummyERC721 = await DummyERC721.new();
     dummyERC1155 = await DummyERC1155.new();
@@ -53,7 +53,6 @@ contract('Dexther', (accounts) => {
     */
 
     const offer = await instance.getOffer(0);
-    console.log(offer);
   });
 
   it('Should create an offer and swap NFTs', async () => {
@@ -90,7 +89,7 @@ contract('Dexther', (accounts) => {
     );
   });
 
-  it('Should create an offer and swap NFTs', async () => {
+  it('Should create an offer, swap NFTs and collect the assets', async () => {
     await dummyERC721.mint(accounts[0], 0);
     await dummyERC721.approve(instance.address, 0);
 
@@ -127,5 +126,62 @@ contract('Dexther', (accounts) => {
       0,
       true,
     );
+
+    const ownerOfOfferToken = await dummyERC721.ownerOf(0);
+    assert.equal(ownerOfOfferToken, accounts[1], 'Wrong offer token owner');
+
+    const ownerOfSwapToken = await dummyERC721.ownerOf(1);
+    assert.equal(ownerOfSwapToken, accounts[0], 'Wrong swap token owner');
+
+    const balanceOf = await dummyERC20.balanceOf(accounts[1]);
+    assert.equal(balanceOf.toString(), web3.utils.toWei('100'), 'Wrong balance');
+  });
+
+  it('Should create an offer, swap NFTs and collect the collateral', async () => {
+    await dummyERC721.mint(accounts[0], 0);
+    await dummyERC721.approve(instance.address, 0);
+
+    await instance.createOffer(
+      web3.utils.toWei('100').toString(),
+      dummyERC20.address,
+      [dummyERC721.address],
+      [0],
+      [1],
+      [],
+      constants.AddressZero,
+    );
+
+    await dummyERC721.mint(accounts[1], 1);
+    await dummyERC721.approve(instance.address, 1, {
+      from: accounts[1],
+    });
+
+    await dummyERC20.mint(accounts[1], web3.utils.toWei('100'));
+    await dummyERC20.approve(instance.address, web3.utils.toWei('100'), {
+      from: accounts[1],
+    });
+
+    await instance.swap(
+      0,
+      [dummyERC721.address],
+      [1],
+      [0], {
+        from: accounts[1],
+      },
+    );
+
+    await instance.finalize(
+      0,
+      false,
+    );
+
+    const ownerOfOfferToken = await dummyERC721.ownerOf(0);
+    assert.equal(ownerOfOfferToken, accounts[1], 'Wrong offer token owner');
+
+    const ownerOfSwapToken = await dummyERC721.ownerOf(1);
+    assert.equal(ownerOfSwapToken, accounts[1], 'Wrong swap token owner');
+
+    const balanceOf = await dummyERC20.balanceOf(accounts[0]);
+    assert.equal(balanceOf.toString(), web3.utils.toWei('100'), 'Wrong balance');
   });
 });

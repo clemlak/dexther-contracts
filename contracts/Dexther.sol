@@ -34,7 +34,7 @@ contract Dexther {
   uint256 public choicePeriod = 60 * 60 * 24 * 10;
 
   address public owner;
-  uint256 public currentFee = 1;
+  uint256 public currentFee;
   mapping (address => uint256) public availableFees;
 
   event Created(
@@ -58,7 +58,10 @@ contract Dexther {
     uint256 indexed offerId
   );
 
-  constructor() {
+  constructor(
+    uint256 initialFee
+  ) {
+    currentFee = initialFee;
     owner = msg.sender;
   }
 
