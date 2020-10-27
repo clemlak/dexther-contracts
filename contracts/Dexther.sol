@@ -33,9 +33,9 @@ contract Dexther {
   Offer[] public offers;
   uint256 public choicePeriod = 60 * 60 * 24 * 10;
 
-  uint256 public currentFee = 1;
-
   address public owner;
+  uint256 public currentFee = 1;
+  mapping (address => uint256) public availableFees;
 
   event Created(
     address indexed creator,
@@ -76,12 +76,18 @@ contract Dexther {
     currentFee = newCurrentFee;
   }
 
-  function withdrawFee(
+  function withdrawFees(
     address tokenAddress,
     uint256 amount
   ) external onlyOwner() {
+    require(amount <= availableFees[tokenAddress], "Amount too high");
     IERC20 token = IERC20(tokenAddress);
     token.transfer(msg.sender, amount);
+
+    availableFess[tokenAddress] = SafeMath.sub(
+      availableFess[tokenAddress],
+      amount
+    );
   }
 
   function createOffer(
@@ -237,13 +243,17 @@ contract Dexther {
       currentFee
     );
 
+    availableFees[offers[offerId].estimateTokenAddress] = SafeMath.add(
+      availableFees[offers[offerId].estimateTokenAddress],
+      fee
+    );
+
     uint256 estimateAmountMinusFee = SafeMath.sub(
       offers[offerId].estimateAmount,
       fee
     );
 
     estimateToken.transferFrom(address(this), collateralReceiver, estimateAmountMinusFee);
-
     offers[offerId].status = Status.Finalized;
   }
 
@@ -267,8 +277,26 @@ contract Dexther {
     );
 
     IERC20 estimateToken = IERC20(offers[offerId].estimateTokenAddress);
-    estimateToken.transferFrom(address(this), collateralReceiver, offers[offerId].estimateAmount);
 
+    uint256 fee = SafeMath.mul(
+      SafeMath.div(
+        offers[offerId].estimateAmount,
+        10000
+      ),
+      currentFee
+    );
+
+    availableFees[offers[offerId].estimateTokenAddress] = SafeMath.add(
+      availableFees[offers[offerId].estimateTokenAddress],
+      fee
+    );
+
+    uint256 estimateAmountMinusFee = SafeMath.sub(
+      offers[offerId].estimateAmount,
+      fee
+    );
+
+    estimateToken.transferFrom(address(this), collateralReceiver, estimateAmountMinusFee);
     offers[offerId].status = Status.Finalized;
   }
 
