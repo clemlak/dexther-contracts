@@ -81,13 +81,14 @@ contract Dexther {
     uint256 amount
   ) external onlyOwner() {
     require(amount <= availableFees[tokenAddress], "Amount too high");
-    IERC20 token = IERC20(tokenAddress);
-    token.transfer(msg.sender, amount);
 
-    availableFess[tokenAddress] = SafeMath.sub(
-      availableFess[tokenAddress],
+    availableFees[tokenAddress] = SafeMath.sub(
+      availableFees[tokenAddress],
       amount
     );
+
+    IERC20 token = IERC20(tokenAddress);
+    token.transfer(msg.sender, amount);
   }
 
   function createOffer(
