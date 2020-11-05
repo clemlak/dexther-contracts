@@ -7,185 +7,355 @@ import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 
+import "@openzeppelin/contracts/math/SafeMath.sol";
+
 
 contract Dexther {
-  address public admin;
-  uint256 public fee;
+  enum Status { Available, Swapped, Finalized, Canceled }
 
-  string public constant name = "Dexther";
-  string public constant version = "1";
-  uint256 public chainId;
-  bytes32 public DOMAIN_SEPARATOR;
-  bytes32 public constant SWAP_TYPEHASH = keccak256("Swap(address alice,address[] aliceTokens,uint256[] aliceTokensIds,uint256[] aliceTokensValues,uint256 aliceNonce,address bob,address[] bobTokens,uint256[] bobTokensIds,uint256[] bobTokensValues,uint256 bobNonce)");
-
-  struct Swap {
-    address alice;
-    address[] aliceTokens;
-    uint256[] aliceTokensIds;
-    uint256[] aliceTokensValues;
-    uint256 aliceNonce;
-    bytes aliceSig;
-    address bob;
-    address[] bobTokens;
-    uint256[] bobTokensIds;
-    uint256[] bobTokensValues;
-    uint256 bobNonce;
-    bytes bobSig;
+  struct Offer {
+    address creator;
+    uint256 estimateAmount;
+    address estimateTokenAddress;
+    address[] offerTokensAddresses;
+    uint256[] offerTokensIds;
+    uint256[] offerTokensValues;
+    address[] expectedTokens;
+    address restrictedTo;
+    address swapper;
+    uint256 swappedAt;
+    address[] swapTokensAddresses;
+    uint256[] swapTokensIds;
+    uint256[] swapTokensValues;
+    Status status;
   }
 
-  mapping (address => uint256) public nonces;
-  mapping (bytes32 => bool) public isSwapCanceled;
+  Offer[] public offers;
+  uint256 public choicePeriod = 60 * 60 * 24 * 10;
 
-  bytes4 private constant ERC155_INTERFACE = 0xd9b67a26;
-  bytes4 private constant ERC721_INTERFACE = 0x80ac58cd;
+  address public owner;
+  uint256 public currentFee;
+  mapping (address => uint256) public availableFees;
 
-  event Swapped(
-    address indexed alice,
-    address[] aliceTokens,
-    uint256[] aliceTokensIds,
-    uint256[] aliceTokensValues,
-    address indexed bob,
-    address[] bobTokens,
-    uint256[] bobTokensIds,
-    uint256[] bobTokensValues
+  event Created(
+    address indexed creator,
+    uint256 indexed offerId,
+    uint256 estimateAmount,
+    address indexed estimateTokenAddress,
+    address[] offerTokensAddresses,
+    uint256[] offersTokensIds,
+    uint256[] offerTokensValues,
+    address[] expectedTokens,
+    address restrictedTo
   );
 
-  modifier onlyAdmin() {
-    require(msg.sender == admin, "Not admin");
+  event Canceled(
+    uint256 indexed offerId
+  );
+
+  event Swapped(
+    address indexed swapper,
+    uint256 indexed offerId
+  );
+
+  constructor(
+    uint256 initialFee
+  ) {
+    currentFee = initialFee;
+    owner = msg.sender;
+  }
+
+  modifier onlyOwner() {
+    require(msg.sender == owner, "Not owner");
     _;
   }
 
-  constructor(uint256 initialChaindId, uint256 initialFee) {
-    admin = msg.sender;
-    chainId = initialChaindId;
-    fee = initialFee;
+  function updateOwner(address newOwner) external onlyOwner() {
+    owner = newOwner;
+  }
 
-    DOMAIN_SEPARATOR = keccak256(
-      abi.encode(
-        keccak256("EIP721Domain(string name,string version,uint256 chainId,address verifyingContract)"),
-        keccak256(bytes(name)),
-        keccak256(bytes(version)),
-        chainId,
-        address(this)
+  function updateFee(uint256 newCurrentFee) external onlyOwner() {
+    require(newCurrentFee < 100, "Fee too high");
+    currentFee = newCurrentFee;
+  }
+
+  function withdrawFees(
+    address tokenAddress,
+    uint256 amount
+  ) external onlyOwner() {
+    require(amount <= availableFees[tokenAddress], "Amount too high");
+
+    availableFees[tokenAddress] = SafeMath.sub(
+      availableFees[tokenAddress],
+      amount
+    );
+
+    IERC20 token = IERC20(tokenAddress);
+    token.transfer(msg.sender, amount);
+  }
+
+  function createOffer(
+    uint256 estimateAmount,
+    address estimateTokenAddress,
+    address[] memory offerTokensAddresses,
+    uint256[] memory offerTokensIds,
+    uint256[] memory offerTokensValues,
+    address[] memory expectedTokens,
+    address restrictedTo
+  ) external {
+    require(offerTokensAddresses.length > 0, "No assets");
+    require(offerTokensAddresses.length == offerTokensIds.length, "Tokens addresses or ids error");
+    require(offerTokensAddresses.length == offerTokensValues.length, "Tokens addresses or values error");
+
+    _transferAssets(
+      msg.sender,
+      address(this),
+      offerTokensAddresses,
+      offerTokensIds,
+      offerTokensValues
+    );
+
+    offers.push(
+      Offer(
+        msg.sender,
+        estimateAmount,
+        estimateTokenAddress,
+        offerTokensAddresses,
+        offerTokensIds,
+        offerTokensValues,
+        expectedTokens,
+        restrictedTo,
+        address(0),
+        0,
+        new address[](0),
+        new uint256[](0),
+        new uint256[](0),
+        Status.Available
       )
+    );
+
+    emit Created(
+      msg.sender,
+      offers.length - 1,
+      estimateAmount,
+      estimateTokenAddress,
+      offerTokensAddresses,
+      offerTokensIds,
+      offerTokensValues,
+      expectedTokens,
+      restrictedTo
     );
   }
 
-  function setAdmin(address newAdmin) external onlyAdmin() {
-    admin = newAdmin;
+  function cancelOffer(
+    uint256 offerId
+  ) external {
+    require(offers[offerId].creator == msg.sender, "Not creator");
+    require(offers[offerId].status == Status.Available, "Already used");
+
+    offers[offerId].status = Status.Canceled;
+
+    emit Canceled(offerId);
+
+    _transferAssets(
+      address(this),
+      msg.sender,
+      offers[offerId].offerTokensAddresses,
+      offers[offerId].offerTokensIds,
+      offers[offerId].offerTokensValues
+    );
   }
 
-  function updateFee(uint256 newFee) external onlyAdmin() {
-    fee = newFee;
-  }
+  function swap(
+    uint256 offerId,
+    address[] memory swapTokensAddresses,
+    uint256[] memory swapTokensIds,
+    uint256[] memory swapTokensValues
+  ) external {
+    require(offers[offerId].status == Status.Available, "Offer not available");
 
-  function performSwap(
-    Swap memory swap
-  ) external payable {
-    // require(msg.value == fee, "Wrong fee");
-    require(swap.aliceNonce == nonces[swap.alice], "Alice nonce is wrong");
-    require(swap.bobNonce == nonces[swap.bob], "Bob nonce is wrong");
-    require(swap.aliceTokens.length == swap.aliceTokensIds.length, "Alice tokens ids error");
-    require(swap.aliceTokens.length == swap.aliceTokensValues.length, "Alice tokens values error");
+    if (offers[offerId].restrictedTo != address(0)) {
+      require(offers[offerId].restrictedTo == msg.sender, "Not authorized");
+    }
 
-    require(swap.bobTokens.length == swap.bobTokensIds.length, "Bob tokens ids error");
-    require(swap.bobTokens.length == swap.bobTokensValues.length, "Bob tokens values error");
+    if (offers[offerId].expectedTokens.length > 0) {
+      for (uint256 i = 0; i < swapTokensAddresses.length; i += 1) {
+        require(
+          _includes(offers[offerId].expectedTokens, swapTokensAddresses[i]),
+          "Swap token not expected"
+        );
+      }
+    }
 
-    bytes32 digest = keccak256(
-      abi.encodePacked(
-        "\x19\x01",
-        DOMAIN_SEPARATOR,
-        keccak256(
-          abi.encode(
-            SWAP_TYPEHASH,
-            swap.alice,
-            swap.aliceTokens,
-            swap.aliceTokensIds,
-            swap.aliceTokensValues,
-            swap.aliceNonce,
-            swap.bob,
-            swap.bobTokens,
-            swap.bobTokensIds,
-            swap.bobTokensValues,
-            swap.bobNonce
-          )
-        )
-      )
+    IERC20 estimateToken = IERC20(offers[offerId].estimateTokenAddress);
+    estimateToken.transferFrom(msg.sender, address(this), offers[offerId].estimateAmount);
+
+    _transferAssets(
+      msg.sender,
+      address(this),
+      swapTokensAddresses,
+      swapTokensIds,
+      swapTokensValues
     );
 
-    require(swap.alice == recover(digest, swap.aliceSig), "Alice sig is wrong");
-    require(swap.bob == recover(digest, swap.bobSig), "Bob sig is wrong");
+    _transferAssets(
+      address(this),
+      msg.sender,
+      offers[offerId].offerTokensAddresses,
+      offers[offerId].offerTokensIds,
+      offers[offerId].offerTokensValues
+    );
 
-    _swap(swap.alice, swap.bob, swap.aliceTokens, swap.aliceTokensIds, swap.aliceTokensValues);
-    _swap(swap.bob, swap.alice, swap.bobTokens, swap.bobTokensIds, swap.bobTokensValues);
-
-    nonces[swap.alice] += 1;
-    nonces[swap.bob] += 1;
+    offers[offerId].swapper = msg.sender;
+    offers[offerId].swappedAt = block.timestamp;
+    offers[offerId].status = Status.Swapped;
+    offers[offerId].swapTokensAddresses = swapTokensAddresses;
+    offers[offerId].swapTokensIds = swapTokensIds;
+    offers[offerId].swapTokensValues = swapTokensValues;
 
     emit Swapped(
-      swap.alice,
-      swap.aliceTokens,
-      swap.aliceTokensIds,
-      swap.aliceTokensValues,
-      swap.bob,
-      swap.bobTokens,
-      swap.bobTokensIds,
-      swap.bobTokensValues
+      msg.sender,
+      offerId
     );
   }
 
-  function recover(bytes32 hash, bytes memory signature) public pure returns (address) {
-    if (signature.length != 65) {
-      revert("ECDSA: invalid signature length");
-    }
+  function finalize(
+    uint256 offerId,
+    bool claimingAssets
+  ) external {
+    require(msg.sender == offers[offerId].creator, "Not creator");
+    require(offers[offerId].status == Status.Swapped, "Not swapped");
 
-    bytes32 r;
-    bytes32 s;
-    uint8 v;
+    address assetsReceiver = claimingAssets ? msg.sender : offers[offerId].swapper;
+    address collateralReceiver = claimingAssets ? offers[offerId].swapper : msg.sender;
 
-    assembly {
-      r := mload(add(signature, 0x20))
-      s := mload(add(signature, 0x40))
-      v := byte(0, mload(add(signature, 0x60)))
-    }
+    _transferAssets(
+      address(this),
+      assetsReceiver,
+      offers[offerId].swapTokensAddresses,
+      offers[offerId].swapTokensIds,
+      offers[offerId].swapTokensValues
+    );
 
-    if (uint256(s) > 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0) {
-      revert("ECDSA: invalid signature 's' value");
-    }
+    IERC20 estimateToken = IERC20(offers[offerId].estimateTokenAddress);
 
-    if (v != 27 && v != 28) {
-      revert("ECDSA: invalid signature 'v' value");
-    }
+    uint256 fee = SafeMath.mul(
+      SafeMath.div(
+        offers[offerId].estimateAmount,
+        10000
+      ),
+      currentFee
+    );
 
-    address signer = ecrecover(hash, v, r, s);
-    require(signer != address(0), "ECDSA: invalid signature");
+    availableFees[offers[offerId].estimateTokenAddress] = SafeMath.add(
+      availableFees[offers[offerId].estimateTokenAddress],
+      fee
+    );
 
-    return signer;
+    uint256 estimateAmountMinusFee = SafeMath.sub(
+      offers[offerId].estimateAmount,
+      fee
+    );
+
+    estimateToken.transfer(collateralReceiver, estimateAmountMinusFee);
+    offers[offerId].status = Status.Finalized;
   }
 
-  function _swap(
+  function forceChoice(
+    uint256 offerId,
+    bool claimingAssets
+  ) external {
+    require(msg.sender == offers[offerId].swapper, "Not swapper");
+    require(offers[offerId].status == Status.Swapped, "Not swapped");
+    require(block.timestamp + choicePeriod >= offers[offerId].swappedAt, "Too soon");
+
+    address assetsReceiver = claimingAssets ? offers[offerId].swapper : msg.sender;
+    address collateralReceiver = claimingAssets ? msg.sender : offers[offerId].swapper;
+
+    _transferAssets(
+      address(this),
+      assetsReceiver,
+      offers[offerId].swapTokensAddresses,
+      offers[offerId].swapTokensIds,
+      offers[offerId].swapTokensValues
+    );
+
+    IERC20 estimateToken = IERC20(offers[offerId].estimateTokenAddress);
+
+    uint256 fee = SafeMath.mul(
+      SafeMath.div(
+        offers[offerId].estimateAmount,
+        10000
+      ),
+      currentFee
+    );
+
+    availableFees[offers[offerId].estimateTokenAddress] = SafeMath.add(
+      availableFees[offers[offerId].estimateTokenAddress],
+      fee
+    );
+
+    uint256 estimateAmountMinusFee = SafeMath.sub(
+      offers[offerId].estimateAmount,
+      fee
+    );
+
+    estimateToken.transfer(collateralReceiver, estimateAmountMinusFee);
+    offers[offerId].status = Status.Finalized;
+  }
+
+  function getOffer(
+    uint256 offerId
+  ) external view returns (Offer memory) {
+    return offers[offerId];
+  }
+
+  function _transferAssets(
     address from,
     address to,
-    address[] memory tokens,
+    address[] memory tokensAddresses,
     uint256[] memory tokensIds,
     uint256[] memory tokensValues
   ) private {
-    for (uint256 i = 0; i < tokens.length; i += 1) {
-      IERC165 tokenWithoutInterface = IERC165(tokens[i]);
+    for (uint256 i = 0; i < tokensAddresses.length; i += 1) {
+      IERC165 tokenWithoutInterface = IERC165(tokensAddresses[i]);
 
       try tokenWithoutInterface.supportsInterface(0xd9b67a26) returns (bool hasInterface) {
           if (hasInterface) {
-              IERC1155 token = IERC1155(tokens[i]);
+              IERC1155 token = IERC1155(tokensAddresses[i]);
               bytes memory data;
               token.safeTransferFrom(from, to, tokensIds[i], tokensValues[i], data);
           } else {
-              IERC721 token = IERC721(tokens[i]);
-              token.safeTransferFrom(from, to, tokensIds[i]);
+              IERC721 token = IERC721(tokensAddresses[i]);
+              try token.transferFrom(from, to, tokensIds[i]) {
+                // Success
+              } catch {
+                // address(token).transfer(to, tokensIds[i]);
+              }
           }
       } catch {
-        IERC20 token = IERC20(tokens[i]);
-        token.transferFrom(from, to, tokensIds[i]);
+        IERC20 token = IERC20(tokensAddresses[i]);
+        try token.transferFrom(from, to, tokensIds[i]) {
+          //
+        } catch {
+          token.transfer(to, tokensIds[i]);
+        }
       }
     }
+  }
+
+  function _includes(
+    address[] memory source,
+    address value
+  ) private pure returns (bool) {
+    bool isIncluded = false;
+
+    for (uint256 i = 0; i < source.length; i += 1) {
+      if (source[i] == value) {
+        isIncluded = true;
+      }
+    }
+
+    return isIncluded;
   }
 }

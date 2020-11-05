@@ -2,8 +2,8 @@ require('dotenv').config();
 const HDWalletProvider = require('@truffle/hdwallet-provider');
 
 const {
-  WALLET_PRIVATE_KEY,
-  INFURA_API_KEY,
+  PRIVATE_KEY,
+  INFURA_ID,
 } = process.env;
 
 module.exports = {
@@ -13,11 +13,18 @@ module.exports = {
       port: 8545,
       network_id: '*',
     },
-    ropsten: {
-      provider: () => new HDWalletProvider(WALLET_PRIVATE_KEY, `https://ropsten.infura.io/v3/${INFURA_API_KEY}`),
-      network_id: 3,
+    rinkeby: {
+      provider: () => new HDWalletProvider(PRIVATE_KEY, `https://rinkeby.infura.io/v3/${INFURA_ID}`),
+      network_id: 4,
       gas: 5500000,
       timeoutBlocks: 200,
+    },
+    mumbai: {
+      provider: () => new HDWalletProvider(PRIVATE_KEY, 'https://rpc-mumbai.matic.today,'),
+      network_id: 80001,
+      confirmations: 2,
+      timeoutBlocks: 200,
+      skipDryRun: true,
     },
   },
   mocha: {
