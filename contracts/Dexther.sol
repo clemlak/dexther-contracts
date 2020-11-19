@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.7.1;
+pragma solidity 0.7.3;
 pragma experimental ABIEncoderV2;
 
 import "@openzeppelin/contracts/introspection/IERC165.sol";
@@ -8,6 +8,8 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 
 import "@openzeppelin/contracts/math/SafeMath.sol";
+
+import "./IBadERC721.sol";
 
 
 contract Dexther {
@@ -58,16 +60,16 @@ contract Dexther {
     uint256 indexed offerId
   );
 
+  modifier onlyOwner() {
+    require(msg.sender == owner, "Not owner");
+    _;
+  }
+
   constructor(
     uint256 initialFee
   ) {
     currentFee = initialFee;
     owner = msg.sender;
-  }
-
-  modifier onlyOwner() {
-    require(msg.sender == owner, "Not owner");
-    _;
   }
 
   function updateOwner(address newOwner) external onlyOwner() {
@@ -77,6 +79,10 @@ contract Dexther {
   function updateFee(uint256 newCurrentFee) external onlyOwner() {
     require(newCurrentFee < 100, "Fee too high");
     currentFee = newCurrentFee;
+  }
+
+  function updateChoicePeriod(uint256 newChoicePeriod) external onlyOwner() {
+    choicePeriod = newChoicePeriod;
   }
 
   function withdrawFees(
@@ -320,25 +326,20 @@ contract Dexther {
     for (uint256 i = 0; i < tokensAddresses.length; i += 1) {
       IERC165 tokenWithoutInterface = IERC165(tokensAddresses[i]);
 
-      try tokenWithoutInterface.supportsInterface(0xd9b67a26) returns (bool hasInterface) {
-          if (hasInterface) {
-              IERC1155 token = IERC1155(tokensAddresses[i]);
-              bytes memory data;
-              token.safeTransferFrom(from, to, tokensIds[i], tokensValues[i], data);
-          } else {
-              IERC721 token = IERC721(tokensAddresses[i]);
-              try token.transferFrom(from, to, tokensIds[i]) {
-                // Success
-              } catch {
-                // address(token).transfer(to, tokensIds[i]);
-              }
-          }
-      } catch {
-        IERC20 token = IERC20(tokensAddresses[i]);
+      bool hasERC1155Interface = tokenWithoutInterface.supportsInterface(0xd9b67a26);
+
+      if (hasERC1155Interface) {
+        IERC1155 token = IERC1155(tokensAddresses[i]);
+        bytes memory data;
+        token.safeTransferFrom(from, to, tokensIds[i], tokensValues[i], data);
+      } else {
+        IERC721 token = IERC721(tokensAddresses[i]);
+
         try token.transferFrom(from, to, tokensIds[i]) {
-          //
+          // Success
         } catch {
-          token.transfer(to, tokensIds[i]);
+          IBadERC721 badToken = IBadERC721(tokensAddresses[i]);
+          badToken.transfer(to, tokensValues[i]);
         }
       }
     }

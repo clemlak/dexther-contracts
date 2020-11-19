@@ -4,8 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "ganache": "ganache-cli -m \"remember banana north fog educate blue frost path once try toilet calm\"",
-    "test": "truffle test"
+    "deploy-ropsten": "npx hardhat run ./scripts/deploy.ts --network ropsten",
+    "test": "npx hardhat test"
   },
   "repository": {
     "type": "git",
@@ -19,17 +19,31 @@
   },
   "homepage": "https://github.com/clemlak/dexther-contracts#readme",
   "dependencies": {
+    "@nomiclabs/hardhat-ethers": "^2.0.0",
+    "@nomiclabs/hardhat-waffle": "^2.0.0",
     "@openzeppelin/contracts": "^3.2.1-solc-0.7",
     "@openzeppelin/test-helpers": "^0.5.6",
-    "@truffle/hdwallet-provider": "^1.1.0",
-    "@typechain/ethers-v5": "^2.0.0",
+    "@typechain/ethers-v5": "^4.0.0",
     "dotenv": "^8.2.0",
-    "ethers": "^5.0.17"
+    "ethereum-waffle": "^3.0.0",
+    "ethers": "^5.0.0",
+    "hardhat": "^2.0.2",
+    "hardhat-typechain": "^0.3.3",
+    "ts-generator": "^0.1.1",
+    "typechain": "^4.0.0",
+    "@nomiclabs/hardhat-etherscan": "^2.0.1"
   },
   "devDependencies": {
-    "eslint": "^7.10.0",
+    "@types/chai": "^4.2.14",
+    "@types/mocha": "^8.0.3",
+    "@types/node": "^14.14.6",
+    "@typescript-eslint/eslint-plugin": "^4.6.1",
+    "@typescript-eslint/parser": "^4.6.1",
+    "chai": "^4.2.0",
+    "eslint": "^7.12.1",
     "eslint-config-airbnb-base": "^14.2.0",
     "eslint-plugin-import": "^2.22.1",
-    "typechain": "^3.0.0"
+    "ts-node": "^9.0.0",
+    "typescript": "^4.0.5"
   }
 }
