@@ -11,8 +11,8 @@ dotenv.config();
 const config: HardhatUserConfig = {
   solidity: '0.7.3',
   networks: {
-    ropsten: {
-      url: `https://ropsten.infura.io/v3/${process.env.INFURA_ID}`,
+    rinkeby: {
+      url: `https://rinkeby.infura.io/v3/${process.env.INFURA_ID}`,
       accounts: [process.env.TEST_PRIVATE_KEY],
     },
   },
